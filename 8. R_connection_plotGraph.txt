@@ -1,0 +1,194 @@
+##############################################################################################################################
+##### Project Name:
+######Assessing change in forest age structure in the western boreal forest using CASFRI and remote sensing products
+#####
+##### Author:
+######Siu Chung Wu (Diego)
+#####
+##### Date:
+######2024 Mar 1
+##############################################################################################################################
+###### Module 7 
+###### Sample R command for generating plots
+##############################################################################################################################
+
+
+# 7.1 connect CASFRI database and load library
+library(DBI)
+library(RPostgreSQL)
+library(ggplot2)
+library(hexbin)
+library(tidyverse)
+library(patchwork)
+
+conn <# dbConnect(RPostgreSQL::PostgreSQL(), 
+                  dbname = "casfri531_dev",
+                  host = "", 
+                  port = 5435,
+                  user = "postgres",
+                  password = "onepostgres")
+
+#clean when necessary
+#rm(list = ls())
+
+
+# 7.2 input the resulting, tenure stratified tables
+# table names example:
+# diego_test.FNmb_CASFRI_changedscas_fullf_age9015 (or changing MB to AB/SK)
+# diego_test.FNab_CASFRI_changedscas_fullf_bore_age9015 (or changing bore to hemi)
+
+result <- dbGetQuery(conn,"SELECT * FROM diego_test.FNbc_CASFRI_changedscas_fullf_bore_age9015")
+
+colnamesDate <- colnames(result)
+print(colnamesDate)
+str(result)
+
+
+##############################################################################################################################
+#1.1 create the Triple age bar chart of age_1990, age_2015 and _age_2015_noDist
+# Define breaks and labels for the age bins again for clarity for 1990
+breaks_1990 <- seq(from = 0, to = max(result$age_1990, na.rm = TRUE) + 10, by = 10)
+labels_1990 <- sprintf("%d", breaks_1990[-length(breaks_1990)] + 5)  # Create labels that are the midpoints of the bins
+
+# Filter out negative values, then bin 'age_1990' into decades using cut() for 1990
+age_counts_1990 <- result %>%
+  filter(age_1990 >= 0) %>%
+  mutate(age_bin_1990 = cut(age_1990, breaks = breaks_1990, labels = labels_1990, include.lowest = TRUE)) %>%
+  group_by(age_bin_1990) %>%
+  summarise(count_1990 = n(), .groups = 'drop')
+
+# Calculate the proportion for each age group for 1990
+age_counts_1990 <- age_counts_1990 %>%
+  mutate(proportion_1990 = count_1990 / sum(count_1990))
+
+visible_labels_1990 <- labels_1990[seq(1, length(labels_1990), by = 5)]
+
+
+
+# Define breaks and labels for the age bins again for clarity for 2015
+breaks_2015 <- seq(from = 0, to = max(result$age_2015, na.rm = TRUE) + 10, by = 10)
+labels_2015 <- sprintf("%d", breaks_2015[-length(breaks_2015)] + 5)  # Create labels that are the midpoints of the bins
+
+# Filter out negative values, then bin 'age_1990' into decades using cut() for 2015
+age_counts_2015 <- result %>%
+  filter(age_2015 >= 0) %>%
+  mutate(age_bin_2015 = cut(age_2015, breaks = breaks_2015, labels = labels_2015, include.lowest = TRUE)) %>%
+  group_by(age_bin_2015) %>%
+  summarise(count_2015 = n(), .groups = 'drop')
+
+# Calculate the proportion for each age group for 2015
+age_counts_2015 <- age_counts_2015 %>%
+  mutate(proportion_2015 = count_2015 / sum(count_2015))
+
+visible_labels_2015 <- labels_2015[seq(1, length(labels_2015), by = 5)]
+
+
+
+
+# Assuming age_counts for age_1990 and age_2015 are already calculated and contain 'proportion' column
+max_proportion_1990 <- max(age_counts_1990$proportion_1990 * 100, na.rm = TRUE)
+max_proportion_2015 <- max(age_counts_2015$proportion_2015 * 100, na.rm = TRUE)
+max_proportion <- max(max_proportion_1990, max_proportion_2015)
+
+# Adding a little extra space for the top of the y-axis
+y_axis_limit <- max_proportion + 5  # Adjust the '5' as needed for spacing
+
+
+# Create the plot for 1990
+p1 <- ggplot(age_counts_1990, aes(x = age_bin_1990, y = proportion_1990 * 100)) +
+  geom_bar(stat = "identity", fill = "black") +
+  scale_y_continuous(
+    name = "Proportion of sample (%)",
+    limits = c(0, y_axis_limit),
+    sec.axis = sec_axis(~ . * sum(age_counts_1990$count_1990) / 100, name = "Sample size")
+  ) +
+  scale_x_discrete(breaks = visible_labels_1990) + # Only show specific labels on x-axis
+  theme_minimal() +
+  theme(axis.text.x = element_text(hjust = 0.5, angle = 0, size = 8),
+        axis.title.y = element_text(color = "black"),
+        axis.title.y.right = element_text(color = "black"),
+        legend.position = "none") +
+  labs(x = "Age in 1990 (in decades)")
+
+# Print the plot if necessary print(p1)
+
+# Create the plot for 2015
+p2 <- ggplot(age_counts_2015, aes(x = age_bin_2015, y = proportion_2015 * 100)) +
+  geom_bar(stat = "identity", fill = "black") +
+  scale_y_continuous(
+    name = "Proportion of sample (%)",
+    limits = c(0, y_axis_limit),
+    sec.axis = sec_axis(~ . * sum(age_counts_2015$count_2015) / 100, name = "Sample size")
+  ) +
+  scale_x_discrete(breaks = visible_labels_2015) + # Only show specific labels on x-axis
+  theme_minimal() +
+  theme(axis.text.x = element_text(hjust = 0.5, angle = 0, size = 8),
+        axis.title.y = element_text(color = "black"),
+        axis.title.y.right = element_text(color = "black"),
+        legend.position = "none") +
+  labs(x = "Age in 2015 (in decades)")
+
+# Print the plot if necessary print(p2)
+
+
+# Prepare the un-disturbed scenario age_2015_noDist
+result$age_2015_noDist <- result$age_1990 + 25
+
+# Define breaks and labels for the age bins again for clarity for age_2015_noDist
+breaks_2015_noDist <- seq(from = 0, to = max(result$age_2015_noDist, na.rm = TRUE) + 10, by = 10)
+labels_2015_noDist <- sprintf("%d", breaks_2015_noDist[-length(breaks_2015_noDist)] + 5)  # Create labels that are the midpoints of the bins
+
+# Filter out negative values, then bin 'age_1990' into decades using cut() for age_2015_noDist
+age_counts_2015_noDist <- result %>%
+  filter(age_2015_noDist >= 0) %>%
+  mutate(age_bin_2015_noDist = cut(age_2015_noDist, breaks = breaks_2015_noDist, labels = labels_2015_noDist, include.lowest = TRUE)) %>%
+  group_by(age_bin_2015_noDist) %>%
+  summarise(count_2015_noDist = n(), .groups = 'drop')
+
+# Calculate the proportion for each age group for age_2015_noDist
+age_counts_2015_noDist <- age_counts_2015_noDist %>%
+  mutate(proportion_2015_noDist = count_2015_noDist / sum(count_2015_noDist))
+
+visible_labels_2015_noDist <- labels_2015_noDist[seq(1, length(labels_2015_noDist), by = 5)]
+
+# Create the plot for age_2015_noDist
+p3 <- ggplot(age_counts_2015_noDist, aes(x = age_bin_2015_noDist, y = proportion_2015_noDist * 100)) +
+  geom_bar(stat = "identity", fill = "black") +
+  scale_y_continuous(
+    name = "Proportion of sample (%)",
+    limits = c(0, y_axis_limit),
+    sec.axis = sec_axis(~ . * sum(age_counts_2015_noDist$count_2015_noDist) / 100, name = "Sample size")
+  ) +
+  scale_x_discrete(breaks = visible_labels_2015_noDist) + # Only show specific labels on x-axis
+  theme_minimal() +
+  theme(axis.text.x = element_text(hjust = 0.5, angle = 0, size = 8),
+        axis.title.y = element_text(color = "black"),
+        axis.title.y.right = element_text(color = "black"),
+        legend.position = "none") +
+  labs(x = "Age in 2015_noDist (in decades)")
+
+# Print the plot if necessary print(p3)
+
+#1.1c put two plots side-by-side
+p1 + p2 + p3
+
+##############################################################################################################################
+# 7.4 create scatter plots - showing if stand age evolve logically
+# filter negative value to make plot
+df_filtered <- result %>%
+  filter(age_1990 >= 0, age_2015 >= 0)
+
+# Create a hexbin plot
+p_hex <- ggplot(df_filtered, aes(x = age_1990 + 25, y = age_2015)) +
+  geom_hex() +  # Let ggplot2 determine the number of bins automatically
+  scale_fill_viridis_c(option = "C", end = 0.9, direction = -1) + # Use viridis color scale
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red", size = 1.5) + # Add a thicker line with slope = 1
+  scale_x_continuous(breaks = seq(0, max(df_filtered$age_1990 + 25, na.rm = TRUE), by = 30)) +
+  scale_y_continuous(breaks = seq(0, max(df_filtered$age_2015, na.rm = TRUE), by = 30)) +
+  theme_minimal() +
+  labs(x = "Age in 1990 + 25", y = "Age in 2015") +
+  annotate("text", x = Inf, y = Inf, label = paste("Total count:", nrow(df_filtered)), 
+           hjust = 1.1, vjust = 1.1, size = 5, color = "blue")
+
+# Print the hexbin plot
+print(p_hex)
